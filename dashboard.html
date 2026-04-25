@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>FlowMind — Building Infrastructure Control</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#F4F5F7;--surface:#FFFFFF;--surface2:#F8F9FB;--surface3:#EEF0F4;
+  --border:#DDE1EA;--border2:#C8CCDA;
+  --ink:#0F1623;--ink2:#3D4560;--ink3:#7B849E;--ink4:#A8B0C4;
+  --teal:#0B7A5E;--teal-lt:#E6F4F0;--teal-md:#1FAF87;
+  --amber:#92580A;--amber-lt:#FDF3E3;--amber-md:#E09020;
+  --red:#B91C1C;--red-lt:#FEF2F2;--red-md:#DC2626;
+  --blue:#1547A0;--blue-lt:#EFF4FF;--blue-md:#2563EB;
+  --slate:#2D3A52;
+  --font:'IBM Plex Sans',sans-serif;--mono:'IBM Plex Mono',monospace;
+}
+
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:13px;min-height:100vh;}
+
+/* ── TOPBAR ── */
+.topbar{
+  background:var(--slate);color:#fff;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 28px;height:52px;
+}
+.tb-left{display:flex;align-items:center;gap:20px;}
+.tb-brand{display:flex;align-items:center;gap:10px;}
+.tb-hexagon{width:30px;height:30px;position:relative;display:flex;align-items:center;justify-content:center;}
+.tb-hexagon svg{width:30px;height:30px;}
+.tb-name{font-size:15px;font-weight:600;letter-spacing:0.3px;color:#fff;}
+.tb-divider{width:1px;height:22px;background:rgba(255,255,255,0.15);}
+.tb-module{font-size:11px;color:rgba(255,255,255,0.5);font-family:var(--mono);letter-spacing:0.5px;}
+.tb-right{display:flex;align-items:center;gap:16px;}
+.tb-time{font-family:var(--mono);font-size:12px;color:rgba(255,255,255,0.6);}
+.tb-conn{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;}
+.tb-conn-dot{width:6px;height:6px;border-radius:50%;animation:blink 1.4s infinite;}
+.conn-live .tb-conn-dot{background:#34D399;}
+.conn-live .tb-conn-label{color:#34D399;}
+.conn-err .tb-conn-dot{background:#F87171;}
+.conn-err .tb-conn-label{color:#F87171;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+
+/* ── SIDEBAR ── */
+.layout{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 52px);}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:20px 0;}
+.sb-section{margin-bottom:24px;}
+.sb-label{font-family:var(--mono);font-size:9px;letter-spacing:1.8px;color:var(--ink4);text-transform:uppercase;padding:0 20px;margin-bottom:10px;}
+.sb-agent{display:flex;align-items:center;gap:10px;padding:9px 20px;border-left:2px solid transparent;transition:all 0.2s;cursor:default;}
+.sb-agent.active{background:var(--teal-lt);border-left-color:var(--teal-md);}
+.sb-agent.busy{background:var(--amber-lt);border-left-color:var(--amber-md);}
+.sb-agent.alert{background:var(--red-lt);border-left-color:var(--red-md);}
+.sb-agent-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.sb-agent-icon svg{width:14px;height:14px;}
+.icon-teal{background:var(--teal-lt);}
+.icon-teal svg{stroke:var(--teal);}
+.icon-blue{background:var(--blue-lt);}
+.icon-blue svg{stroke:var(--blue-md);}
+.icon-amber{background:var(--amber-lt);}
+.icon-amber svg{stroke:var(--amber);}
+.icon-red{background:var(--red-lt);}
+.icon-red svg{stroke:var(--red-md);}
+.icon-slate{background:var(--surface3);}
+.icon-slate svg{stroke:var(--ink2);}
+.sb-agent-info{flex:1;min-width:0;}
+.sb-agent-name{font-size:11px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sb-agent-st{font-family:var(--mono);font-size:9px;margin-top:1px;}
+.sb-agent-st.ok{color:var(--teal);}
+.sb-agent-st.busy{color:var(--amber);}
+.sb-agent-st.alert{color:var(--red-md);}
+.sb-agent-cnt{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink3);}
+
+.sb-kpi-grid{padding:0 20px;display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.sb-kpi{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;}
+.sb-kpi-val{font-family:var(--mono);font-size:20px;font-weight:600;}
+.sb-kpi-val.red{color:var(--red-md);}
+.sb-kpi-val.amber{color:var(--amber-md);}
+.sb-kpi-val.teal{color:var(--teal-md);}
+.sb-kpi-val.blue{color:var(--blue-md);}
+.sb-kpi-lbl{font-size:9px;color:var(--ink3);margin-top:3px;line-height:1.3;}
+
+/* ── MAIN CONTENT ── */
+.content{padding:22px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;}
+
+/* ── SECTION HEADERS ── */
+.sec-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.sec-title{font-size:11px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:1px;font-family:var(--mono);}
+.sec-badge{font-family:var(--mono);font-size:9px;background:var(--surface3);color:var(--ink3);padding:3px 8px;border-radius:4px;border:1px solid var(--border);}
+
+/* ── EQUIPMENT CARDS ── */
+.equip-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.equip-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;transition:all 0.3s;}
+.equip-card.status-fault{border-color:var(--red-md);box-shadow:0 0 0 1px var(--red-md);}
+.equip-card.status-warn{border-color:var(--amber-md);}
+.equip-top{padding:12px 14px 10px;border-bottom:1px solid var(--border);}
+.equip-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
+.equip-id-wrap{}
+.equip-id{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--ink);}
+.equip-type{font-size:9px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.8px;margin-top:2px;}
+.equip-status-dot{width:8px;height:8px;border-radius:50%;margin-top:3px;}
+.dot-ok{background:var(--teal-md);}
+.dot-fault{background:var(--red-md);animation:blink 0.8s infinite;}
+.dot-warn{background:var(--amber-md);animation:blink 1.2s infinite;}
+.equip-sev{font-family:var(--mono);font-size:8px;font-weight:600;padding:3px 7px;border-radius:4px;border:1px solid;}
+.sev-normal{background:var(--teal-lt);color:var(--teal);border-color:rgba(11,122,94,0.2);}
+.sev-low{background:#FFF8E6;color:#92580A;border-color:rgba(224,144,32,0.3);}
+.sev-medium{background:var(--amber-lt);color:var(--amber);border-color:rgba(224,144,32,0.4);}
+.sev-high{background:var(--red-lt);color:var(--red);border-color:rgba(185,28,28,0.3);}
+.equip-loc{font-size:9px;color:var(--ink4);font-family:var(--mono);}
+
+.equip-sensors{padding:10px 14px 12px;}
+.sensor-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.sensor-row:last-child{margin-bottom:0;}
+.sensor-name{font-size:9px;color:var(--ink3);font-family:var(--mono);width:60px;flex-shrink:0;}
+.sensor-bar-wrap{flex:1;margin:0 8px;height:4px;background:var(--surface3);border-radius:2px;overflow:hidden;}
+.sensor-bar-inner{height:100%;border-radius:2px;transition:width 0.7s ease,background 0.4s;}
+.sensor-reading{font-family:var(--mono);font-size:10px;font-weight:500;width:50px;text-align:right;flex-shrink:0;}
+.reading-ok{color:var(--teal);}
+.reading-warn{color:var(--amber-md);}
+.reading-high{color:var(--red-md);}
+
+/* ── PANELS ROW ── */
+.panels-row{display:grid;grid-template-columns:1fr 340px;gap:14px;}
+
+/* ── INCIDENT LOG ── */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+.panel-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surface2);}
+.panel-title{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--ink2);letter-spacing:0.8px;text-transform:uppercase;}
+.panel-count{font-family:var(--mono);font-size:10px;color:var(--ink3);background:var(--surface3);padding:2px 8px;border-radius:4px;border:1px solid var(--border);}
+.panel-body{padding:12px;}
+
+.incident-list{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;}
+.incident-list::-webkit-scrollbar{width:3px;}
+.incident-list::-webkit-scrollbar-thumb{background:var(--border2);}
+.incident-item{border:1px solid var(--border);border-radius:8px;overflow:hidden;animation:fadein 0.3s;}
+@keyframes fadein{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.inc-bar{height:3px;}
+.inc-bar.emergency{background:var(--red-md);}
+.inc-bar.scheduled{background:var(--amber-md);}
+.inc-bar.monitor{background:var(--blue-md);}
+.inc-content{padding:9px 12px;}
+.inc-row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.inc-eq{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink);}
+.urg-chip{font-family:var(--mono);font-size:8px;font-weight:600;padding:2px 8px;border-radius:3px;}
+.urg-emergency{background:var(--red-lt);color:var(--red);border:1px solid rgba(185,28,28,0.2);}
+.urg-scheduled{background:var(--amber-lt);color:var(--amber);border:1px solid rgba(146,88,10,0.2);}
+.urg-monitor{background:var(--blue-lt);color:var(--blue);border:1px solid rgba(21,71,160,0.2);}
+.inc-cause{font-size:10px;color:var(--ink2);margin-bottom:3px;}
+.inc-meta{display:flex;justify-content:space-between;}
+.inc-tech{font-family:var(--mono);font-size:9px;color:var(--teal);}
+.inc-ttf{font-family:var(--mono);font-size:9px;color:var(--ink4);}
+
+/* ── MESSAGE FEED ── */
+.feed-list{display:flex;flex-direction:column;gap:4px;max-height:290px;overflow-y:auto;}
+.feed-list::-webkit-scrollbar{width:3px;}
+.feed-list::-webkit-scrollbar-thumb{background:var(--border2);}
+.feed-item{display:flex;gap:8px;padding:6px 8px;border-radius:5px;background:var(--surface2);border-left:2px solid;animation:fadein 0.25s;}
+.feed-item.fault{border-left-color:var(--red-md);}
+.feed-item.diag{border-left-color:var(--blue-md);}
+.feed-item.dispatch{border-left-color:var(--amber-md);}
+.feed-item.report{border-left-color:var(--teal-md);}
+.feed-item.flow{border-left-color:#7C3AED;}
+.feed-item.system{border-left-color:var(--ink3);}
+.feed-item.normal{border-left-color:var(--border2);}
+.feed-time{font-family:var(--mono);font-size:9px;color:var(--ink4);flex-shrink:0;padding-top:1px;}
+.feed-txt{font-size:10px;color:var(--ink2);line-height:1.4;}
+
+/* ── DEMAND TABLE ── */
+.demand-table{width:100%;border-collapse:collapse;}
+.demand-table th{font-family:var(--mono);font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--ink4);padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--surface2);}
+.demand-table td{padding:8px 12px;font-size:11px;border-bottom:1px solid var(--border);color:var(--ink2);vertical-align:middle;}
+.demand-table tr:last-child td{border-bottom:none;}
+.demand-table tr:hover td{background:var(--surface2);}
+.eq-cell{font-family:var(--mono);font-weight:600;color:var(--ink);}
+.pax-cell{font-family:var(--mono);font-weight:600;color:var(--ink);}
+.win-cell{font-family:var(--mono);font-size:9px;color:var(--ink4);}
+.risk-chip{font-family:var(--mono);font-size:8px;font-weight:600;padding:3px 8px;border-radius:3px;}
+.risk-high{background:var(--red-lt);color:var(--red);}
+.risk-medium{background:var(--amber-lt);color:var(--amber);}
+.risk-low{background:var(--teal-lt);color:var(--teal);}
+
+/* ── BOTTOM ROW ── */
+.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+
+/* ── EMPTY ── */
+.empty-state{padding:28px;text-align:center;font-family:var(--mono);font-size:10px;color:var(--ink4);}
+
+/* ── OFFLINE BANNER ── */
+.offline-banner{display:none;background:var(--red-lt);border-bottom:1px solid rgba(185,28,28,0.2);padding:8px 28px;font-family:var(--mono);font-size:10px;color:var(--red);text-align:center;}
+
+/* ── FOOTER ── */
+.footer{background:var(--surface);border-top:1px solid var(--border);padding:10px 28px;display:flex;justify-content:space-between;align-items:center;}
+.footer-left{font-family:var(--mono);font-size:9px;color:var(--ink4);}
+.footer-right{font-family:var(--mono);font-size:9px;color:var(--ink4);}
+</style>
+</head>
+<body>
+
+<div class="offline-banner" id="offline-banner">
+  Connection lost — ensure <strong>python main.py</strong> is running on port 5000
+</div>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="tb-left">
+    <div class="tb-brand">
+      <div class="tb-hexagon">
+        <svg viewBox="0 0 30 30" fill="none">
+          <path d="M15 3L25.5 9V21L15 27L4.5 21V9L15 3Z" stroke="rgba(255,255,255,0.9)" stroke-width="1.5" fill="rgba(255,255,255,0.08)"/>
+          <circle cx="15" cy="15" r="4" fill="rgba(255,255,255,0.9)"/>
+          <line x1="15" y1="9" x2="15" y2="11" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
+          <line x1="15" y1="19" x2="15" y2="21" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
+          <line x1="9" y1="12" x2="11" y2="13" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
+          <line x1="19" y1="17" x2="21" y2="18" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
+        </svg>
+      </div>
+      <div>
+        <div class="tb-name">FlowMind</div>
+      </div>
+    </div>
+    <div class="tb-divider"></div>
+    <div class="tb-module">Building Infrastructure Control · TIES454 · Neural Nexus</div>
+  </div>
+  <div class="tb-right">
+    <div class="tb-conn conn-live" id="tb-conn">
+      <div class="tb-conn-dot"></div>
+      <span class="tb-conn-label" id="tb-conn-label">CONNECTED</span>
+    </div>
+    <div class="tb-divider"></div>
+    <div class="tb-time" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<!-- LAYOUT -->
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <div class="sb-section">
+      <div class="sb-label">Agent Network</div>
+
+      <div class="sb-agent active" id="sb-fault_detection">
+        <div class="sb-agent-icon icon-teal">
+          <svg viewBox="0 0 14 14" fill="none" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="6" cy="6" r="4"/><line x1="9" y1="9" x2="12" y2="12"/>
+          </svg>
+        </div>
+        <div class="sb-agent-info">
+          <div class="sb-agent-name">Fault Detection</div>
+          <div class="sb-agent-st ok" id="sb-fault_detection-st">monitoring</div>
+        </div>
+        <div class="sb-agent-cnt" id="sb-fault_detection-cnt">0</div>
+      </div>
+
+      <div class="sb-agent active" id="sb-diagnostic">
+        <div class="sb-agent-icon icon-blue">
+          <svg viewBox="0 0 14 14" fill="none" stroke-width="1.5" stroke-linecap="round">
+            <path d="M2 7h2l2-4 2 8 2-4 1 0h1"/>
+          </svg>
+        </div>
+        <div class="sb-agent-info">
+          <div class="sb-agent-name">Diagnostic</div>
+          <div class="sb-agent-st ok" id="sb-diagnostic-st">waiting</div>
+        </div>
+        <div class="sb-agent-cnt" id="sb-diagnostic-cnt">0</div>
+      </div>
+
+      <div class="sb-agent active" id="sb-people_flow">
+        <div class="sb-agent-icon icon-slate">
+          <svg viewBox="0 0 14 14" fill="none" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="5" cy="4" r="1.5"/><circle cx="9" cy="4" r="1.5"/>
+            <path d="M2 11c0-2 1.3-3 3-3s3 1 3 3"/><path d="M9 8c1.5 0 3 1 3 3"/>
+          </svg>
+        </div>
+        <div class="sb-agent-info">
+          <div class="sb-agent-name">People Flow</div>
+          <div class="sb-agent-st ok" id="sb-people_flow-st">forecasting</div>
+        </div>
+        <div class="sb-agent-cnt" id="sb-people_flow-cnt">0</div>
+      </div>
+
+      <div class="sb-agent active" id="sb-dispatch">
+        <div class="sb-agent-icon icon-amber">
+          <svg viewBox="0 0 14 14" fill="none" stroke-width="1.5" stroke-linecap="round">
+            <path d="M2 2l10 5-10 5V9l6-2-6-2V2z"/>
+          </svg>
+        </div>
+        <div class="sb-agent-info">
+          <div class="sb-agent-name">Dispatch Coord.</div>
+          <div class="sb-agent-st ok" id="sb-dispatch-st">standby</div>
+        </div>
+        <div class="sb-agent-cnt" id="sb-dispatch-cnt">0</div>
+      </div>
+
+      <div class="sb-agent active" id="sb-reporting">
+        <div class="sb-agent-icon icon-slate">
+          <svg viewBox="0 0 14 14" fill="none" stroke-width="1.5" stroke-linecap="round">
+            <rect x="2" y="2" width="10" height="10" rx="1.5"/>
+            <line x1="4.5" y1="5" x2="9.5" y2="5"/>
+            <line x1="4.5" y1="7" x2="9.5" y2="7"/>
+            <line x1="4.5" y1="9" x2="7" y2="9"/>
+          </svg>
+        </div>
+        <div class="sb-agent-info">
+          <div class="sb-agent-name">Reporting</div>
+          <div class="sb-agent-st ok" id="sb-reporting-st">collecting</div>
+        </div>
+        <div class="sb-agent-cnt" id="sb-reporting-cnt">0</div>
+      </div>
+    </div>
+
+    <div class="sb-section">
+      <div class="sb-label">KPI Summary</div>
+      <div class="sb-kpi-grid">
+        <div class="sb-kpi">
+          <div class="sb-kpi-val teal" id="kpi-total">0</div>
+          <div class="sb-kpi-lbl">Total incidents</div>
+        </div>
+        <div class="sb-kpi">
+          <div class="sb-kpi-val red" id="kpi-emerg">0</div>
+          <div class="sb-kpi-lbl">Emergency dispatches</div>
+        </div>
+        <div class="sb-kpi">
+          <div class="sb-kpi-val amber" id="kpi-sched">0</div>
+          <div class="sb-kpi-lbl">Scheduled actions</div>
+        </div>
+        <div class="sb-kpi">
+          <div class="sb-kpi-val blue" id="kpi-msgs">0</div>
+          <div class="sb-kpi-lbl">Agent messages</div>
+        </div>
+        <div class="sb-kpi" style="grid-column:span 2;">
+          <div class="sb-kpi-val teal" id="kpi-down">0</div>
+          <div class="sb-kpi-lbl">Minutes of downtime prevented</div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- MAIN -->
+  <main class="content">
+
+    <!-- EQUIPMENT MONITORING -->
+    <section>
+      <div class="sec-head">
+        <span class="sec-title">Equipment Monitoring</span>
+        <span class="sec-badge">4 UNITS ONLINE</span>
+      </div>
+      <div class="equip-row" id="equip-row">
+        <div style="grid-column:span 4;"><div class="empty-state">Awaiting sensor data from SPADE agents...</div></div>
+      </div>
+    </section>
+
+    <!-- INCIDENTS + FEED -->
+    <div class="panels-row">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Incident Log</span>
+          <span class="panel-count" id="inc-count">0 incidents</span>
+        </div>
+        <div class="panel-body">
+          <div class="incident-list" id="incident-list">
+            <div class="empty-state">No incidents recorded — system nominal</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Agent Message Feed</span>
+        </div>
+        <div class="panel-body">
+          <div class="feed-list" id="feed-list">
+            <div class="empty-state">Waiting for agent messages...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEMAND TABLE -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Passenger Demand Forecast</span>
+        <span class="panel-count">People Flow Predictor Agent</span>
+      </div>
+      <table class="demand-table">
+        <thead>
+          <tr>
+            <th>Unit</th>
+            <th>Predicted Passengers</th>
+            <th>Time Window</th>
+            <th>Demand Risk</th>
+          </tr>
+        </thead>
+        <tbody id="demand-body">
+          <tr><td colspan="4"><div class="empty-state">Awaiting forecast from People Flow Agent...</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </main>
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  <div class="footer-left">SPADE 3.x &nbsp;·&nbsp; ejabberd XMPP &nbsp;·&nbsp; Flask REST API &nbsp;·&nbsp; Python 3.11 &nbsp;·&nbsp; University of Jyväskylä — TIES454</div>
+  <div class="footer-right">Neural Nexus · FlowMind v1.0 &nbsp;·&nbsp; <span id="last-update">never updated</span></div>
+</div>
+
+<script>
+const API='http://localhost:5000/api/snapshot';
+let prevMsgCount=0, prevIncCount=0;
+
+function tick(){
+  const now=new Date();
+  document.getElementById('clock').textContent=now.toLocaleTimeString('fi-FI');
+}
+setInterval(tick,1000); tick();
+
+function sbAgentClass(status){
+  const s=(status||'').toLowerCase();
+  if(s.includes('anomaly')||s.includes('fault')||s.includes('emergency')||s.includes('alert')) return 'alert';
+  if(s.includes('analys')||s.includes('dispatching')||s.includes('triage')||s.includes('logging')||s.includes('received')||s.includes('busy')) return 'busy';
+  return 'active';
+}
+function stClass(status){
+  const s=(status||'').toLowerCase();
+  if(s.includes('anomaly')||s.includes('fault')||s.includes('emergency')) return 'alert';
+  if(s.includes('analys')||s.includes('dispatching')||s.includes('received')||s.includes('logging')) return 'busy';
+  return 'ok';
+}
+
+function renderAgents(agents){
+  Object.entries(agents).forEach(([name,d])=>{
+    const sb=document.getElementById(`sb-${name}`);
+    const st=document.getElementById(`sb-${name}-st`);
+    const cnt=document.getElementById(`sb-${name}-cnt`);
+    if(sb) sb.className=`sb-agent ${sbAgentClass(d.status)}`;
+    if(st){st.textContent=d.status||'--';st.className=`sb-agent-st ${stClass(d.status)}`;}
+    if(cnt) cnt.textContent=d.msg_count||0;
+  });
+}
+
+function sevClass(sev){
+  if(!sev||sev==='normal') return 'normal';
+  return sev;
+}
+function barColor(pct,sev){
+  if(sev==='high') return '#DC2626';
+  if(sev==='medium') return '#E09020';
+  if(sev==='low') return '#E09020';
+  return '#1FAF87';
+}
+function readingClass(val,threshold,warn){
+  if(val>threshold) return 'reading-high';
+  if(val>warn) return 'reading-warn';
+  return 'reading-ok';
+}
+
+function renderEquip(readings){
+  if(!readings||!Object.keys(readings).length) return;
+  const row=document.getElementById('equip-row');
+  const TYPES={
+    'ELV-01':{type:'Elevator',loc:'Helsinki Tower'},
+    'ELV-04':{type:'Elevator',loc:'Helsinki Tower'},
+    'ESC-A': {type:'Escalator',loc:'Mall — North Wing'},
+    'ESC-B': {type:'Escalator',loc:'Mall — South Wing'},
+  };
+  row.innerHTML=Object.entries(readings).map(([id,r])=>{
+    const sev=r.severity||'normal';
+    const isFault=sev==='high';
+    const isWarn=sev==='medium'||sev==='low';
+    const cardCls=isFault?'status-fault':isWarn?'status-warn':'';
+    const dotCls=isFault?'dot-fault':isWarn?'dot-warn':'dot-ok';
+    const sevCls=`sev-${sev}`;
+    const sevTxt=(sev==='normal'?'NOMINAL':sev).toUpperCase();
+    const vib=parseFloat(r.vibration||0);
+    const tmp=parseFloat(r.temperature||0);
+    const drs=parseInt(r.door_cycles||0);
+    const vibPct=Math.min(100,Math.round((vib/14)*100));
+    const tmpPct=Math.min(100,Math.round((tmp/100)*100));
+    const drsPct=Math.min(100,Math.round((drs/1200)*100));
+    const meta=TYPES[id]||{type:'Unit',loc:'—'};
+    return `
+    <div class="equip-card ${cardCls}">
+      <div class="equip-top">
+        <div class="equip-header">
+          <div class="equip-id-wrap">
+            <div class="equip-id">${id}</div>
+            <div class="equip-type">${meta.type}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">
+            <div class="equip-status-dot ${dotCls}"></div>
+            <div class="equip-sev ${sevCls}">${sevTxt}</div>
+          </div>
+        </div>
+        <div class="equip-loc">${meta.loc}</div>
+      </div>
+      <div class="equip-sensors">
+        <div class="sensor-row">
+          <span class="sensor-name">VIBRATION</span>
+          <div class="sensor-bar-wrap"><div class="sensor-bar-inner" style="width:${vibPct}%;background:${barColor(vibPct,sev)};"></div></div>
+          <span class="sensor-reading ${readingClass(vib,7,5)}">${vib.toFixed(2)}</span>
+        </div>
+        <div class="sensor-row">
+          <span class="sensor-name">TEMP °C</span>
+          <div class="sensor-bar-wrap"><div class="sensor-bar-inner" style="width:${tmpPct}%;background:${barColor(tmpPct,sev)};"></div></div>
+          <span class="sensor-reading ${readingClass(tmp,75,65)}">${tmp.toFixed(1)}</span>
+        </div>
+        <div class="sensor-row">
+          <span class="sensor-name">DOOR CYC.</span>
+          <div class="sensor-bar-wrap"><div class="sensor-bar-inner" style="width:${drsPct}%;background:${barColor(drsPct,sev)};"></div></div>
+          <span class="sensor-reading ${readingClass(drs,950,800)}">${drs}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderFeed(messages){
+  if(!messages||!messages.length) return;
+  const list=document.getElementById('feed-list');
+  if(list.querySelector('.empty-state')) list.innerHTML='';
+  if(messages.length<=prevMsgCount) return;
+  const newOnes=messages.slice(0,messages.length-prevMsgCount);
+  prevMsgCount=messages.length;
+  newOnes.forEach(m=>{
+    const el=document.createElement('div');
+    el.className=`feed-item ${m.type||'system'}`;
+    el.innerHTML=`<span class="feed-time">${m.timestamp||''}</span><span class="feed-txt">${m.text||''}</span>`;
+    list.insertBefore(el,list.firstChild);
+  });
+  while(list.querySelectorAll('.feed-item').length>40) list.removeChild(list.lastChild);
+}
+
+function renderIncidents(incidents){
+  if(!incidents||!incidents.length) return;
+  const list=document.getElementById('incident-list');
+  const count=document.getElementById('inc-count');
+  count.textContent=`${incidents.length} incident${incidents.length===1?'':'s'}`;
+  if(list.querySelector('.empty-state')) list.innerHTML='';
+  if(incidents.length<=prevIncCount){return;}
+  prevIncCount=incidents.length;
+  list.innerHTML=incidents.slice(0,15).map(inc=>`
+    <div class="incident-item">
+      <div class="inc-bar ${inc.urgency||'monitor'}"></div>
+      <div class="inc-content">
+        <div class="inc-row1">
+          <span class="inc-eq">${inc.equipment_id}</span>
+          <span class="urg-chip urg-${inc.urgency||'monitor'}">${(inc.urgency||'monitor').toUpperCase()}</span>
+        </div>
+        <div class="inc-cause">${inc.root_cause||''}</div>
+        <div class="inc-meta">
+          <span class="inc-tech">→ ${inc.technician||''}</span>
+          <span class="inc-ttf">TTF ${inc.ttf_hours||'?'}h &nbsp;·&nbsp; ${inc.predicted_passengers||0} pax</span>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function renderDemand(forecasts){
+  if(!forecasts||!Object.keys(forecasts).length) return;
+  document.getElementById('demand-body').innerHTML=
+    Object.entries(forecasts).map(([id,f])=>`
+    <tr>
+      <td class="eq-cell">${id}</td>
+      <td class="pax-cell">${f.passengers||0}</td>
+      <td class="win-cell">${f.time_window||'—'}</td>
+      <td><span class="risk-chip risk-${f.risk||'low'}">${(f.risk||'low').toUpperCase()}</span></td>
+    </tr>`).join('');
+}
+
+function renderKpis(k){
+  if(!k) return;
+  document.getElementById('kpi-total').textContent=k.total_incidents||0;
+  document.getElementById('kpi-emerg').textContent=k.emergencies||0;
+  document.getElementById('kpi-sched').textContent=k.scheduled||0;
+  document.getElementById('kpi-msgs').textContent=k.messages_sent||0;
+  document.getElementById('kpi-down').textContent=k.downtime_saved||0;
+}
+
+async function poll(){
+  try{
+    const r=await fetch(API);
+    const d=await r.json();
+    document.getElementById('tb-conn').className='tb-conn conn-live';
+    document.getElementById('tb-conn-label').textContent='CONNECTED';
+    document.getElementById('offline-banner').style.display='none';
+    document.getElementById('last-update').textContent=
+      'last update '+new Date().toLocaleTimeString('fi-FI');
+    renderKpis(d.kpis);
+    renderAgents(d.agent_status||{});
+    renderEquip(d.sensor_readings||{});
+    renderFeed(d.messages||[]);
+    renderIncidents(d.incidents||[]);
+    renderDemand(d.demand_forecasts||{});
+  } catch(e){
+    document.getElementById('tb-conn').className='tb-conn conn-err';
+    document.getElementById('tb-conn-label').textContent='OFFLINE';
+    document.getElementById('offline-banner').style.display='block';
+  }
+}
+
+poll();
+setInterval(poll,1000);
+</script>
+</body>
+</html>

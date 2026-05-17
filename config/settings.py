@@ -14,9 +14,9 @@ AGENTS = {
 }
 
 # Simulation timing
-SENSOR_CHECK_INTERVAL = 5
-FORECAST_INTERVAL     = 8
-REPORT_INTERVAL       = 40
+SENSOR_CHECK_INTERVAL = 5 # 5 seconds 
+FORECAST_INTERVAL     = 8 # 8 seconds
+REPORT_INTERVAL       = 40 # 40 seconds
 
 # Fault thresholds
 VIBRATION_THRESHOLD   = 7.0

@@ -2,7 +2,7 @@
 
 > **TIES454 — Agent Technologies for Developers**
 > University of Jyväskylä | April 2026
-> Group: **Neural Nexus** — Javeria Kanwal, Sana Mazhar, Sidrah Raheem, Asra Anees
+> Group: **Neural Nexus** — Javeria Kanwal, Sana Mazhar, Sidrah Rahim, Asra Anees
 
 ---
 

@@ -1,6 +1,10 @@
 # agents/dispatch_coordinator_agent.py
+# FlowMind – Dispatch Coordinator Agent (BDI-enhanced)
+# Now uses BeliefBase, GoalManager, and PlanLibrary for reasoning
+
 import json
 import random
+import datetime
 import spade
 from spade.behaviour import CyclicBehaviour
 from spade.template import Template
@@ -8,6 +12,7 @@ from spade.template import Template
 from config.settings import AGENTS
 from utils.message_templates import make_dispatch_decision_msg
 from utils.event_store import store
+from agents.bdi_engine import BeliefBase, GoalManager, Goal, PlanLibrary
 
 
 class DispatchCoordinatorAgent(spade.agent.Agent):
@@ -25,11 +30,23 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
 
     def __init__(self, jid, password):
         super().__init__(jid, password)
+
+        # ── BDI Components ─────────────────────────────────────
+        self.beliefs = BeliefBase()
+        self.goals   = GoalManager()
+
+        # Raw message stores (unchanged from before)
         self.diagnostic_reports = {}
         self.demand_forecasts   = {}
         self.fault_alerts       = {}
 
+    # ──────────────────────────────────────────────────────────
+    # BEHAVIOUR 1: Receive Fault Alert from FaultDetectionAgent
+    # Updates beliefs: severity, timestamp
+    # Adds goals: DISPATCH_TECHNICIAN, RESTORE_SERVICE
+    # ──────────────────────────────────────────────────────────
     class ReceiveFaultAlertBehaviour(CyclicBehaviour):
+
         async def run(self):
             msg = await self.receive(timeout=10)
             if msg is None:
@@ -39,23 +56,48 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
                 if data.get("msg_type") != "fault_alert":
                     return
 
-                eq_id = data["equipment_id"]
+                eq_id    = data["equipment_id"]
+                severity = data["severity"]
+
                 print(f"\n[Dispatch] 📥 Fault alert — "
-                      f"{eq_id} | {data['severity'].upper()}")
+                      f"{eq_id} | {severity.upper()}")
 
                 store.update_agent("dispatch", "alert received")
                 store.add_message(
                     f"📥 Fault alert received — "
-                    f"{eq_id} | Severity: {data['severity'].upper()}",
+                    f"{eq_id} | Severity: {severity.upper()}",
                     "dispatch", "dispatch"
                 )
+
+                # ── Update Beliefs ─────────────────────────────
+                self.agent.beliefs.update(eq_id, "severity",  severity)
+                self.agent.beliefs.update(eq_id, "fault_time",
+                    data.get("timestamp", "unknown"))
+
+                # ── Add Goals ──────────────────────────────────
+                self.agent.goals.add_goal(
+                    eq_id, Goal.DISPATCH_TECHNICIAN,
+                    "DISPATCH_TECHNICIAN",
+                    f"Fault detected — severity {severity}"
+                )
+                self.agent.goals.add_goal(
+                    eq_id, Goal.RESTORE_SERVICE,
+                    "RESTORE_SERVICE",
+                    "Equipment failure must be resolved"
+                )
+
                 self.agent.fault_alerts[eq_id] = data
                 await self.agent._try_dispatch(eq_id)
 
             except Exception as e:
                 print(f"[Dispatch] ❌ Fault alert error: {e}")
 
+    # ──────────────────────────────────────────────────────────
+    # BEHAVIOUR 2: Receive Diagnostic Report from DiagnosticAgent
+    # Updates beliefs: root_cause, ttf_hours, action
+    # ──────────────────────────────────────────────────────────
     class ReceiveDiagnosticReportBehaviour(CyclicBehaviour):
+
         async def run(self):
             msg = await self.receive(timeout=10)
             if msg is None:
@@ -66,6 +108,7 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
                     return
 
                 eq_id = data["equipment_id"]
+
                 print(f"\n[Dispatch] 📥 Diagnostic report — {eq_id}")
                 print(f"  Root Cause: {data['root_cause']}")
                 print(f"  TTF       : {data['ttf_hours']}h")
@@ -77,13 +120,25 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
                     f"{data['action'].upper()}",
                     "dispatch", "dispatch"
                 )
+
+                # ── Update Beliefs ─────────────────────────────
+                self.agent.beliefs.update(eq_id, "root_cause", data["root_cause"])
+                self.agent.beliefs.update(eq_id, "ttf_hours",  data["ttf_hours"])
+                self.agent.beliefs.update(eq_id, "action",     data["action"])
+
                 self.agent.diagnostic_reports[eq_id] = data
                 await self.agent._try_dispatch(eq_id)
 
             except Exception as e:
                 print(f"[Dispatch] ❌ Diagnostic error: {e}")
 
+    # ──────────────────────────────────────────────────────────
+    # BEHAVIOUR 3: Receive Demand Forecast from PeopleFlowAgent
+    # Updates beliefs: passengers, risk_level, is_rush_hour
+    # Adds conflicting goal if rush hour: MINIMIZE_DISRUPTION
+    # ──────────────────────────────────────────────────────────
     class ReceiveDemandForecastBehaviour(CyclicBehaviour):
+
         async def run(self):
             msg = await self.receive(timeout=10)
             if msg is None:
@@ -93,9 +148,34 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
                 if data.get("msg_type") != "demand_forecast":
                     return
 
-                eq_id = data["equipment_id"]
+                eq_id     = data["equipment_id"]
+                passengers = data["predicted_passengers"]
+                risk      = data["risk_level"]
+
                 print(f"[Dispatch] 📥 Forecast — {eq_id} | "
-                      f"{data['predicted_passengers']} pax")
+                      f"{passengers} pax | Risk: {risk.upper()}")
+
+                # ── Update Beliefs ─────────────────────────────
+                self.agent.beliefs.update(eq_id, "passengers",  passengers)
+                self.agent.beliefs.update(eq_id, "risk_level",  risk)
+
+                # Determine if this is rush hour from time window
+                is_rush = passengers >= 200
+                self.agent.beliefs.update(eq_id, "is_rush_hour", is_rush)
+
+                # ── Add Conflicting Goal if Rush Hour ──────────
+                # This is what enables Scenario 2 conflict detection
+                if is_rush:
+                    self.agent.goals.add_goal(
+                        eq_id, Goal.MINIMIZE_DISRUPTION,
+                        "MINIMIZE_DISRUPTION",
+                        f"Rush hour — {passengers} passengers at risk"
+                    )
+                    self.agent.goals.add_goal(
+                        eq_id, Goal.PASSENGER_SAFETY,
+                        "PASSENGER_SAFETY",
+                        "Passenger safety must be considered in all decisions"
+                    )
 
                 self.agent.demand_forecasts[eq_id] = data
                 await self.agent._try_dispatch(eq_id)
@@ -103,38 +183,68 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
             except Exception as e:
                 print(f"[Dispatch] ❌ Forecast error: {e}")
 
+    # ──────────────────────────────────────────────────────────
+    # CORE: Try Dispatch — runs after every message
+    # Waits until both fault alert AND diagnostic are available.
+    # Then invokes BDI reasoning to make dispatch decision.
+    # ──────────────────────────────────────────────────────────
     async def _try_dispatch(self, equipment_id: str):
         has_alert      = equipment_id in self.fault_alerts
         has_diagnostic = equipment_id in self.diagnostic_reports
 
         if not (has_alert and has_diagnostic):
-            return
+            return  # Not enough information yet — wait
 
-        alert      = self.fault_alerts[equipment_id]
-        diagnostic = self.diagnostic_reports[equipment_id]
-        demand     = self.demand_forecasts.get(equipment_id, None)
+        # ── Print current belief and goal state ───────────────
+        print(f"\n{'='*55}")
+        print(f"  [BDI] Reasoning for {equipment_id}")
+        print(self.beliefs.summary(equipment_id))
+        print(self.goals.summary(equipment_id))
+        print(f"{'='*55}")
 
-        # Autonomous decisions
-        urgency    = self._classify_urgency(diagnostic, demand)
-        technician = self._select_technician(equipment_id)
-        briefing   = self._generate_briefing(
-            equipment_id, diagnostic, demand, urgency
+        # ── BDI: Select Plan ──────────────────────────────────
+        decision = PlanLibrary.select_plan(
+            equipment_id, self.beliefs, self.goals
         )
 
-        pax = demand["predicted_passengers"] if demand else 0
+        urgency   = decision["urgency"]
+        reasoning = decision["reasoning"]
+        scenario  = decision["scenario"]
+        conflict  = decision["conflict"]
 
-        print(f"\n[Dispatch] 🚨 DISPATCH — {equipment_id}")
+        # ── Select technician ─────────────────────────────────
+        technician = self._select_technician(equipment_id)
+
+        # ── Build briefing ────────────────────────────────────
+        diagnostic = self.diagnostic_reports[equipment_id]
+        demand     = self.demand_forecasts.get(equipment_id, None)
+        pax        = demand["predicted_passengers"] if demand else 0
+
+        briefing = (
+            f"[{scenario}] "
+            f"UNIT {equipment_id} | {urgency.upper()} | "
+            f"{diagnostic['root_cause']} | "
+            f"TTF: {diagnostic['ttf_hours']}h | "
+            f"Load: {pax} passengers | "
+            f"Conflict: {conflict}"
+        )
+
+        print(f"\n[Dispatch] 🚨 DISPATCH DECISION — {equipment_id}")
+        print(f"  Scenario  : {scenario}")
         print(f"  Urgency   : {urgency.upper()}")
         print(f"  Technician: {technician['name']}")
+        print(f"  Conflict  : {conflict}")
+        print(f"  Reasoning :\n    {reasoning}")
 
-        store.update_agent("dispatch", f"dispatching → {urgency}")
+        store.update_agent("dispatch", f"{scenario} → {urgency}")
         store.add_message(
-            f"🚨 DISPATCH DECISION — {equipment_id} | "
-            f"{urgency.upper()} | → {technician['name']}",
+            f"🚨 [{scenario}] DISPATCH — {equipment_id} | "
+            f"{urgency.upper()} | Conflict:{conflict} | "
+            f"→ {technician['name']}",
             "dispatch", "dispatch"
         )
 
-        # Add to incident log in event store
+        # ── Log incident ──────────────────────────────────────
         store.add_incident(
             equipment_id=equipment_id,
             root_cause=diagnostic["root_cause"],
@@ -145,7 +255,7 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
             predicted_passengers=pax,
         )
 
-        # Send work order to Reporting Agent
+        # ── Send work order to Reporting Agent ────────────────
         msg = make_dispatch_decision_msg(
             to=AGENTS["reporting"],
             equipment_id=equipment_id,
@@ -163,25 +273,15 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
         )
         print(f"[Dispatch] 📤 Work order → Reporting ({equipment_id})")
 
-        # Clear processed data
+        # ── Clear processed data and BDI state ────────────────
         self.fault_alerts.pop(equipment_id, None)
         self.diagnostic_reports.pop(equipment_id, None)
+        self.beliefs.clear(equipment_id)
+        self.goals.clear(equipment_id)
 
-    def _classify_urgency(self, diagnostic, demand):
-        action = diagnostic.get("action",    "monitor")
-        ttf    = diagnostic.get("ttf_hours",  12.0)
-        risk   = demand.get("risk_level",     "low") \
-                 if demand else "low"
-        pax    = demand.get("predicted_passengers", 0) \
-                 if demand else 0
-
-        if action == "emergency":           return "emergency"
-        if ttf <= 3.0 and risk == "high":   return "emergency"
-        if pax >= 300  and ttf <= 6.0:      return "emergency"
-        if action == "scheduled":           return "scheduled"
-        if risk == "medium" or ttf <= 8.0:  return "scheduled"
-        return "monitor"
-
+    # ──────────────────────────────────────────────────────────
+    # HELPER: Select technician by equipment type
+    # ──────────────────────────────────────────────────────────
     def _select_technician(self, equipment_id):
         eq_type     = "elevator" if "ELV" in equipment_id \
                       else "escalator"
@@ -192,24 +292,18 @@ class DispatchCoordinatorAgent(spade.agent.Agent):
         return random.choice(specialists) if specialists \
                else random.choice(self.TECHNICIANS)
 
-    def _generate_briefing(self, equipment_id, diagnostic,
-                           demand, urgency):
-        pax = demand["predicted_passengers"] if demand else "N/A"
-        return (
-            f"UNIT {equipment_id} | {urgency.upper()} | "
-            f"{diagnostic['root_cause']} | "
-            f"TTF: {diagnostic['ttf_hours']}h | "
-            f"Load: {pax} passengers | "
-            f"Action: {diagnostic['action']}"
-        )
-
+    # ──────────────────────────────────────────────────────────
+    # SETUP
+    # ──────────────────────────────────────────────────────────
     async def setup(self):
         print("\n" + "="*55)
         print("  [Dispatch] 🤖 Dispatch Coordinator Agent STARTED")
+        print("  BDI Engine: BeliefBase + GoalManager + PlanLibrary")
         print("="*55 + "\n")
+
         store.update_agent("dispatch", "standby")
         store.add_message(
-            "🤖 Dispatch Coordinator started — awaiting alerts",
+            "🤖 Dispatch Coordinator started — BDI reasoning active",
             "system", "dispatch"
         )
 
